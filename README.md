@@ -188,6 +188,7 @@ When --driver-path is provided:
 ## WebDriver Setup Details
 If automatic driver setup fails, the script prints instructions and links.
 Here’s a summary:
+
 **ChromeDriver (for Chrome)**
 - Download:
   https://chromedriver.chromium.org/downloads
