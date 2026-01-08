@@ -196,14 +196,14 @@ Here’s a summary:
   1. Check your Chrome version: chrome://settings/help.
   2. Download the matching ChromeDriver for your OS.
   3. Extract the binary (chromedriver / chromedriver.exe).
-  4. 
+     
 **GeckoDriver (for Firefox)**
 - Download:
   https://github.com/mozilla/geckodriver/releases
 - Steps:
   1. Download the latest release for your OS/architecture.
   2. Extract geckodriver / geckodriver.exe.
-  3. 
+     
 **Edge WebDriver (for Edge)**
 - Download:
   https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/
@@ -211,7 +211,7 @@ Here’s a summary:
   1. Check Edge version: edge://settings/help.
   2. Download the matching Edge WebDriver.
   3. Extract msedgedriver / msedgedriver.exe.
-  4. 
+     
 **Add to PATH (summary)**
 - **Windows:**
   - Place driver in e.g. C:\WebDrivers\.
