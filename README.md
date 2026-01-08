@@ -162,7 +162,9 @@ Increase the delay to be more gentle and reduce risk of rate limiting:
 python whatsapp_web_filter_cli.py -i data/input_numbers.txt --delay 4
 ```
 This waits 4 seconds after each number check.
+
 ---
+
 **8. Using a Custom WebDriver Path (--driver-path)**
 If you have manually downloaded a driver:
 **Windows example (Chrome)**
