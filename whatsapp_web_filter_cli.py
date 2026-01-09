@@ -38,10 +38,18 @@ def read_numbers_from_file(path: Path) -> List[str]:
 
 
 def write_numbers(path: Path, numbers: List[str]) -> None:
+    # Ensure directory exists
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         for n in numbers:
             f.write(n + "\n")
+    print(f"[INFO] Wrote {len(numbers)} numbers to: {path.resolve()}")
+
+
+def append_log(log_path: Path, text: str) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(text + "\n")
 
 
 # ---------- WebDriver helpers ----------
@@ -119,7 +127,7 @@ def create_driver(browser: str, headless: bool = False, driver_path: Optional[st
             chrome_profile_dir.mkdir(exist_ok=True)
             options.add_argument(f"user-data-dir={chrome_profile_dir.resolve()}")
 
-            # (Optional but recommended) Disable some sandboxing issues in some environments
+            # Helpful flags in some environments
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
 
@@ -138,10 +146,8 @@ def create_driver(browser: str, headless: bool = False, driver_path: Optional[st
         elif browser == "firefox":
             options = webdriver.FirefoxOptions()
 
-            # Optional: use a dedicated Firefox profile directory as well
             firefox_profile_dir = base_profile_dir / "firefox_whatsapp_profile"
             firefox_profile_dir.mkdir(exist_ok=True)
-            # For full custom profile, you could use FirefoxProfile, but this is usually enough.
 
             if headless:
                 options.headless = True
@@ -180,7 +186,6 @@ def create_driver(browser: str, headless: bool = False, driver_path: Optional[st
     except (WebDriverException, Exception) as e:
         print(f"[ERROR] Failed to create WebDriver for {browser}: {e}")
         if not driver_path:
-            # Only show auto-download instructions if user didn't specify a path
             print_manual_driver_instructions(browser)
         else:
             print("[INFO] You provided --driver-path, but launching the driver still failed.")
@@ -188,28 +193,63 @@ def create_driver(browser: str, headless: bool = False, driver_path: Optional[st
         raise SystemExit(1)
 
 
-def wait_for_login(driver: webdriver.Remote, timeout: int = 120) -> None:
+def wait_for_login(driver: webdriver.Remote, timeout: int = 180) -> None:
+    """
+    Wait until WhatsApp Web is fully loaded after login.
+
+    Watches for QR code vs main app UI.
+    """
     print("[INFO] Waiting for WhatsApp Web login (scan the QR code if needed)...")
+
+    end_time = time.time() + timeout
+    last_state = None
+
+    while time.time() < end_time:
+        try:
+            # QR code elements
+            qr_elements = driver.find_elements(By.CSS_SELECTOR, "canvas[aria-label='Scan me!']")
+            qr_containers = driver.find_elements(By.CSS_SELECTOR, "div[data-testid='qrcode']")
+
+            # Main app / chat UI elements (post-login)
+            app_root = driver.find_elements(By.CSS_SELECTOR, "div[data-testid='app']")
+            chat_list = driver.find_elements(By.CSS_SELECTOR, "div[aria-label='Chats'], div[aria-label='Chat list']")
+            conversation_header = driver.find_elements(By.CSS_SELECTOR, "header[data-testid='conversation-header']")
+
+            if qr_elements or qr_containers:
+                if last_state != "qr":
+                    print("[DEBUG] QR code detected, waiting for you to scan...")
+                    last_state = "qr"
+
+            if app_root or chat_list or conversation_header:
+                print("[INFO] Logged into WhatsApp Web (main UI detected).")
+                return
+
+        except Exception:
+            pass
+
+        time.sleep(1)
+
+    print("[ERROR] Timed out waiting for WhatsApp Web login.")
     try:
-        WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "div[data-testid='chat-list-search']")
-            )
-        )
-    except TimeoutException:
-        print("[ERROR] Timed out waiting for WhatsApp Web login.")
-        raise
-    print("[INFO] Logged into WhatsApp Web.")
+        driver.save_screenshot("whatsapp_login_timeout.png")
+        print("[INFO] Saved screenshot: whatsapp_login_timeout.png")
+    except Exception as e:
+        print(f"[WARN] Could not save screenshot: {e}")
+    raise TimeoutException("WhatsApp Web login not detected in time")
 
 
 def open_chat_for_number(
     driver: webdriver.Remote,
     phone_number: str,
-    timeout: int = 20
+    timeout: int = 15
 ) -> Tuple[bool, str]:
     """
     Try to open chat for a given phone number via URL.
     Return (is_registered, reason).
+
+    For your current WhatsApp Web behavior:
+    - If the invalid popup appears ("Phone number shared via url is invalid.") -> invalid.
+    - If that popup does NOT appear within a short timeout -> treat as valid.
     """
     sanitized = phone_number.strip().replace("+", "").replace(" ", "")
     url = f"{WHATSAPP_WEB_URL}/send?phone={sanitized}&text=&type=phone_number&app_absent=0"
@@ -218,38 +258,35 @@ def open_chat_for_number(
     # Give WhatsApp time to redirect and render
     time.sleep(3)
 
-    # 1) Look for an error dialog/text
-    try:
-        error_div = WebDriverWait(driver, 8).until(
-            EC.presence_of_element_located(
-                (
-                    By.XPATH,
-                    "//*[contains(text(),'phone number shared via url is invalid') "
-                    "or contains(text(),'couldn’t find this account') "
-                    "or contains(text(),'couldn\\'t find this account') "
-                    "or contains(text(),'invalid phone number')]"
-                )
-            )
-        )
-        if error_div:
-            return False, "Error dialog: number invalid or not registered."
-    except TimeoutException:
-        # No error dialog detected (or text changed)
-        pass
+    # 1) Exact invalid popup detection (from your DOM)
+    invalid_modal_xpath = (
+        "//div[@data-animate-modal-popup='true' and "
+        "contains(@aria-label, 'Phone number shared via url is invalid')]"
+        " | "
+        "//div[@data-animate-modal-body='true']"
+        "[.//div[contains(normalize-space(.), 'Phone number shared via url is invalid.')]]"
+    )
 
-    # 2) Look for chat header (means chat opened)
     try:
-        chat_header = WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "header[data-testid='conversation-header']")
-            )
+        # Wait up to 7 seconds for the invalid popup to appear
+        invalid_modal = WebDriverWait(driver, 7).until(
+            EC.presence_of_element_located((By.XPATH, invalid_modal_xpath))
         )
-        if chat_header:
-            return True, "Chat opened successfully (likely WhatsApp account)."
+        if invalid_modal:
+            print("[DEBUG] Exact invalid-number modal detected for:", phone_number)
+            return False, "Invalid popup detected: phone number shared via url is invalid."
     except TimeoutException:
-        return False, "Timeout waiting for chat UI (ambiguous; treating as invalid)."
+        # No invalid popup detected within 7s – treat as valid for your case
+        print("[DEBUG] No invalid popup detected for:", phone_number)
+        return True, "No invalid popup detected within timeout: treating as valid."
+    except Exception as e:
+        print(f"[WARN] Error while checking for invalid popup: {e}")
+        # On unexpected error, be conservative: treat as invalid
+        return False, f"Error while checking popup: {e!r}"
 
-    return False, "Unknown UI state (treating as invalid)."
+    # Fallback (should almost never reach here)
+    print("[DEBUG] Reached fallback path for:", phone_number)
+    return False, "Fallback path reached: treating as invalid."
 
 
 def filter_numbers(
@@ -334,9 +371,17 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    cwd = Path.cwd()
+    print(f"[INFO] Current working directory: {cwd}")
+
     input_path = Path(args.input)
     valid_path = Path(args.valid_output)
     invalid_path = Path(args.invalid_output)
+    log_path = cwd / "run_log.txt"
+
+    print(f"[INFO] Input file: {input_path.resolve()}")
+    print(f"[INFO] Valid output will be: {valid_path.resolve()}")
+    print(f"[INFO] Invalid output will be: {invalid_path.resolve()}")
 
     if not input_path.exists():
         print(f"[ERROR] Input file not found: {input_path}")
@@ -360,9 +405,16 @@ def main() -> None:
     write_numbers(valid_path, valid)
     write_numbers(invalid_path, invalid)
 
-    print(f"[INFO] Done.")
-    print(f"[INFO] Valid:   {len(valid)} -> {valid_path}")
-    print(f"[INFO] Invalid: {len(invalid)} -> {invalid_path}")
+    summary = (
+        f"Run finished: {time.strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"Input: {input_path.resolve()} | "
+        f"Valid: {len(valid)} -> {valid_path.resolve()} | "
+        f"Invalid: {len(invalid)} -> {invalid_path.resolve()}"
+    )
+
+    append_log(log_path, summary)
+    print(f"[INFO] {summary}")
+    print(f"[INFO] Log appended to: {log_path.resolve()}")
 
 
 if __name__ == "__main__":
