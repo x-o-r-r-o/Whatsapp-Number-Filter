@@ -14,7 +14,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
 from webdriver_manager.microsoft import EdgeChromiumDriverManager
-
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.edge.service import Service as EdgeService
@@ -27,7 +26,6 @@ WHATSAPP_WEB_URL = "https://web.whatsapp.com"
 def read_numbers_from_file(path: Path) -> List[str]:
     with path.open("r", encoding="utf-8") as f:
         lines = [line.strip() for line in f]
-
     seen = set()
     cleaned = []
     for line in lines:
@@ -103,13 +101,28 @@ def print_manual_driver_instructions(browser: str) -> None:
 def create_driver(browser: str, headless: bool = False, driver_path: Optional[str] = None) -> webdriver.Remote:
     """
     Create a Selenium WebDriver for the selected browser.
+
     If driver_path is provided, use that binary directly.
     Otherwise, use webdriver_manager to auto-download drivers.
     """
+
+    # Base directory for all browser profiles: current working directory
+    base_profile_dir = Path.cwd() / "browser_profiles"
+    base_profile_dir.mkdir(exist_ok=True)
+
     try:
         if browser == "chrome":
             options = webdriver.ChromeOptions()
-            options.add_argument("user-data-dir=./chrome_whatsapp_profile_chrome")
+
+            # Use a dedicated, absolute profile directory for Chrome
+            chrome_profile_dir = base_profile_dir / "chrome_whatsapp_profile"
+            chrome_profile_dir.mkdir(exist_ok=True)
+            options.add_argument(f"user-data-dir={chrome_profile_dir.resolve()}")
+
+            # (Optional but recommended) Disable some sandboxing issues in some environments
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+
             if headless:
                 options.add_argument("--headless=new")
                 options.add_argument("--disable-gpu")
@@ -124,8 +137,12 @@ def create_driver(browser: str, headless: bool = False, driver_path: Optional[st
 
         elif browser == "firefox":
             options = webdriver.FirefoxOptions()
-            # This is just a logical profile name; Firefox may create it
-            # differently; for simple use, session persistence may vary.
+
+            # Optional: use a dedicated Firefox profile directory as well
+            firefox_profile_dir = base_profile_dir / "firefox_whatsapp_profile"
+            firefox_profile_dir.mkdir(exist_ok=True)
+            # For full custom profile, you could use FirefoxProfile, but this is usually enough.
+
             if headless:
                 options.headless = True
 
@@ -138,7 +155,11 @@ def create_driver(browser: str, headless: bool = False, driver_path: Optional[st
 
         elif browser == "edge":
             options = webdriver.EdgeOptions()
-            options.add_argument("user-data-dir=./edge_whatsapp_profile")
+
+            edge_profile_dir = base_profile_dir / "edge_whatsapp_profile"
+            edge_profile_dir.mkdir(exist_ok=True)
+            options.add_argument(f"user-data-dir={edge_profile_dir.resolve()}")
+
             if headless:
                 options.add_argument("--headless=new")
                 options.add_argument("--disable-gpu")
@@ -238,8 +259,8 @@ def filter_numbers(
 ) -> Tuple[List[str], List[str]]:
     valid = []
     invalid = []
-
     total = len(numbers)
+
     for idx, num in enumerate(numbers, start=1):
         print(f"[INFO] Checking {idx}/{total}: {num}")
         is_registered, reason = open_chat_for_number(driver, num)
@@ -261,7 +282,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Filter WhatsApp-registered numbers using WhatsApp Web automation."
     )
-
     parser.add_argument(
         "-i",
         "--input",
@@ -308,7 +328,6 @@ def parse_args() -> argparse.Namespace:
             "If not provided, webdriver_manager will try to auto-download the driver."
         ),
     )
-
     return parser.parse_args()
 
 
