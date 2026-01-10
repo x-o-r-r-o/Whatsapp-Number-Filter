@@ -224,6 +224,18 @@ Here’s a summary:
   ```
   Or just use --driver-path to point directly to the driver file.
 ---
+## Multi Thread or Single Mode
+
+**Single Mode**
+```text
+python whatsapp_web_filter_multi-thread_cli.py -i input.txt --mode single --browser chrome
+```
+**Multi Thread Mode**
+```text
+python whatsapp_web_filter_multi-thread_cli.py -i input.txt --mode threaded \
+  --browser chrome --threads 3 --chunk-size 30
+```
+---
 ## Data Format
 **Input**
 - Text file, UTF-8.
